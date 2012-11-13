@@ -1,0 +1,56 @@
+#!/usr/bin/env python
+
+import collections
+import sys
+
+import requests
+
+MAX_DEPTH  = 2000
+HNUser     = collections.namedtuple('HNUser', ['name', 'rank', 'karma'])
+url_format = 'http://api.thriftdb.com/api.hnsearch.com/users/_search?limit=100&start=%s&sortby=karma+desc'
+
+def HNSearchAPIError(Exception):
+    pass
+
+def fetch_batch():
+    for batch_start in xrange(0, MAX_DEPTH, 100):
+        url = url_format % batch_start
+
+        response = requests.get(url)
+        if response.status_code != requests.codes.ok:
+            raise BadResponse("Error: API returned HTTP status code: %s" % response.status_code)
+
+        json = response.json
+        if json is None:
+            raise BadResponse("Error: Failed to decode JSON response.")
+
+        try:
+            results = json['results']
+        except:
+            raise BadResponse("Error: Bad data returned from API.")
+
+        yield [ HNUser(name=result['item']['username'], rank=rank, karma=result['item']['karma'])
+                    for rank, result in enumerate(json['results'], start=batch_start+1) ]
+
+def find_user_by_name(name, hn_users_by_name={}):
+    if name.lower() in hn_users_by_name:
+        return hn_users_by_name[name.lower()]
+
+    for batch in fetch_batch():
+        for user in batch:
+            hn_users_by_name[user.name.lower()] = user
+
+        if name.lower() in hn_users_by_name:
+            return hn_users_by_name[name.lower()]
+
+def main():
+    queries = sys.argv[1:]
+    for name in queries:
+        entry = find_user_by_name(name)
+        if entry:
+            print "User %s is ranked %s with %s karma." % (entry.name, entry.rank, entry.karma)
+        else:
+            print "User %s was not found." % (name)
+
+if __name__ == '__main__':
+    main()
